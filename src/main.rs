@@ -1,113 +1,63 @@
-use std::env;
-
-use colored::*;
-use pnet::datalink; // Importa todo desde colored
-use serde::{Deserialize, Serialize};
-
+use netif;
+use std::{
+    collections::HashMap,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+};
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    // Obtener las interfaces de red
+    let interfaces = netif::up().expect("Failed to get network interfaces");
+    let mut ifaces = Interfaces::new();
 
-    if args.len() > 1 {
-        match args[1].as_str() {
-            "json" | "-j" | "j" => {
-                if args.len() > 2 {
-                    match args[2].as_str() {
-                        "v4" | "4" => json_mode_v4(),
-                        "v6" | "6" => json_mode_v6(),
-                        _ => json_mode(),
-                    }
-                } else {
-                    json_mode()
-                }
-            }
+    // Iterar por cada interfaz
+    for interface in interfaces {
+        // Obtener las direcciones IP de la interfaz
 
-            _ => standard(),
-        };
-    } else {
-        standard();
-    };
-}
-
-fn standard() {
-    // Obtiene una lista de todas las interfaces de red disponibles
-    let all_interfacegs = datalink::interfaces();
-
-    // Filtra las interfaces para obtener aquellas que están activas y tienen una dirección IP
-    // Itera sobre las interfaces activas
-    for iface in all_interfacegs
-        .into_iter()
-        .filter(|e| e.is_up() && !e.ips.is_empty())
-    {
-        println!("{}: {}", "IfName".green(), iface.name.yellow());
-        println!("{}", "Address:".green());
-        for ip in iface.ips {
-            println!(" - {}", ip.to_string().blue());
+        ifaces.add(interface.name(), interface.address());
+    }
+    for iface in ifaces.ifaces.values() {
+        println!("Interface: {}", iface.name);
+        for ip in iface.ip_v4.iter() {
+            println!("  IPv4: {}", ip);
         }
-        println!();
+        for ip in iface.ip_v6.iter() {
+            println!("  IPv6: {}", ip);
+        }
     }
 }
 
-#[derive(Serialize, Deserialize)]
-struct Info {
-    ifname: String,
-    addrs: Vec<String>,
+struct Interface {
+    name: String,
+    ip_v4: Vec<Ipv4Addr>,
+    ip_v6: Vec<Ipv6Addr>,
 }
 
-fn json_mode() {
-    let all_interfaces = datalink::interfaces();
-    let mut info: Vec<Info> = vec![];
-    for iface in all_interfaces
-        .into_iter()
-        .filter(|e| e.is_up() && !e.ips.is_empty())
-    {
-        let json = Info {
-            ifname: iface.name,
-            addrs: iface.ips.iter().map(|e| e.to_string()).collect(),
-        };
-        info.push(json);
-    }
-    println!("{}", serde_json::to_string(&info).unwrap());
-}
-// create a function to print the interface in json with only ip version 6
-fn json_mode_v6() {
-    let all_interfaces = datalink::interfaces();
-    let mut info: Vec<Info> = vec![];
-    for iface in all_interfaces
-        .into_iter()
-        .filter(|e| e.is_up() && !e.ips.is_empty())
-    {
-        let json = Info {
-            ifname: iface.name,
-            addrs: iface
-                .ips
-                .iter()
-                .filter(|e| e.is_ipv6())
-                .map(|e| e.to_string())
-                .collect(),
-        };
-        info.push(json);
-    }
-    println!("{}", serde_json::to_string(&info).unwrap());
+struct Interfaces {
+    ifaces: HashMap<String, Interface>,
 }
 
-// create a function to print the interface in json with only ip version 4
-fn json_mode_v4() {
-    let all_interfaces = datalink::interfaces();
-    let mut info: Vec<Info> = vec![];
-    for iface in all_interfaces
-        .into_iter()
-        .filter(|e| e.is_up() && !e.ips.is_empty())
-    {
-        let json = Info {
-            ifname: iface.name,
-            addrs: iface
-                .ips
-                .iter()
-                .filter(|e| e.is_ipv4())
-                .map(|e| e.to_string())
-                .collect(),
-        };
-        info.push(json);
+impl Interfaces {
+    fn new() -> Self {
+        Self {
+            ifaces: HashMap::new(),
+        }
     }
-    println!("{}", serde_json::to_string(&info).unwrap());
+
+    fn add(&mut self, ifname: &str, addr: &IpAddr) {
+        let iface = self
+            .ifaces
+            .entry(ifname.to_string())
+            .or_insert_with(|| Interface {
+                name: ifname.to_string(),
+                ip_v4: Vec::new(),
+                ip_v6: Vec::new(),
+            });
+        match addr {
+            IpAddr::V4(ip) => {
+                iface.ip_v4.push(*ip);
+            }
+            IpAddr::V6(ip) => {
+                iface.ip_v6.push(*ip);
+            }
+        }
+    }
 }
